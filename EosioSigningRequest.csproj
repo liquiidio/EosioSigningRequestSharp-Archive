@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="Abi.cs" />
+    <None Include="SigningRequest.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\eos-sharp\EosSharp\EosSharp.Core\EosSharp.Core.csproj" />
+    <ProjectReference Include="..\eos-sharp\EosSharp\EosSharp\EosSharp.csproj" />
+  </ItemGroup>
+
+</Project>
