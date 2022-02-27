@@ -4,27 +4,23 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Cryptography.ECDSA;
-using EosSharp;
 using EosSharp.Core;
 using EosSharp.Core.Api.v1;
 using EosSharp.Core.Helpers;
 using EosSharp.Core.Providers;
-using Newtonsoft.Json;
 
-using CallbackType = System.Object; // TODO export type CallbackType = string | {url: string; backgroundBit: boolean}*/
+using CallbackType = System.Object; // TODO export type CallbackType = string | {url: string; background: boolean}*/
 using AbiMap = System.Collections.Generic.Dictionary<string, EosSharp.Core.Api.v1.Abi>; //     export type AbiMap = Map<string, any>
-using Action = EosSharp.Core.Api.v1.Action;
+using RequestFlags = System.Int32;  //number;  // TODO
 using ChainId = System.String; /*checksum256*/
 using VariantId = System.Tuple<string, object>;
-using SignatureType = System.Object;
+using Newtonsoft.Json;
 
 namespace EosioSigningRequest
 {
@@ -81,15 +77,12 @@ namespace EosioSigningRequest
             if (chainId is int)
             {
                 return new VariantId("chain_alias", chainId);
-            } 
-            else
+//                return ['chain_alias', chainId]   // TODO ?
+            } else
             {
-                Console.WriteLine(chainId.GetType().ToString());
-                var t = chainId.GetType();
                 // resolve known chain id's to their aliases
-                var _name = ChainIdLookup.SingleOrDefault(v => v.Value == chainId.ToString()).Key;
-                string name = _name.ToString();
-                if (string.IsNullOrEmpty(name))// ChainName.UNKNOWN ?
+                string name = "EOS";// TODO SerializationHelper.idToName(chainId);
+                if (name != "")// TODO ? ChainName.UNKNOWN)
                 {
                     return new VariantId("chain_id", name);
                 }
@@ -143,7 +136,7 @@ namespace EosioSigningRequest
     }
 
     /**
-     * The callback payload sent to backgroundBit callbacks.
+     * The callback payload sent to background callbacks.
      */
     public class CallbackPayload
     {
@@ -153,7 +146,7 @@ namespace EosioSigningRequest
         /** Transaction ID as HEX-encoded string. */
         public string tx;
 
-        /** Block number hint (only present if transaction was broadcastBit). */
+        /** Block number hint (only present if transaction was broadcast). */
         public string bn;
 
         /** Signer authority, aka account name. */
@@ -172,14 +165,12 @@ namespace EosioSigningRequest
         public string req;
 
         /** Expiration time used when resolving request. */
-        public DateTime ex;
+        public string ex;
 
         /** All signatures 0-indexed as `sig0`, `sig1`, etc. */
         public Dictionary<string, string> sigs;
         //    [sig0: string]: string | undefined    // TODO
         public Dictionary<string, string> data;
-
-        public string cid;
     }
 
     /**
@@ -192,14 +183,14 @@ namespace EosioSigningRequest
         public string url;
 
         /**
-         * Whether to run the request in the backgroundBit. For a https url this
-         * means POST in the backgroundBit instead of a GET redirect.
+         * Whether to run the request in the background. For a https url this
+         * means POST in the background instead of a GET redirect.
          */
         public bool background;
 
         /**
          * The callback payload as a object that should be encoded to JSON
-         * and POSTed to backgroundBit callbacks.
+         * and POSTed to background callbacks.
          */
         public CallbackPayload payload;
     }
@@ -250,6 +241,46 @@ namespace EosioSigningRequest
         FIO = 12,
     }
 
+    /**
+ * The placeholder name: `............1` aka `uint64(1)`.
+ * If used in action data will be resolved to current signer.
+ * If used in as an authorization permission will be resolved to
+ * the signers permission level.
+ *
+ * Example action:
+ * ```
+ * { account: "eosio.token",
+ *   name: "transfer",
+ *   authorization: [{actor: "............1", permission: "............1"}],
+ *   data: {
+ *     from: "............1",
+ *     to: "bar",
+ *     quantity: "42.0000 EOS",
+ *     memo: "Don't panic" }}
+ * ```
+ * When signed by `foo@active` would resolve to:
+ * ```
+ * { account: "eosio.token",
+ *   name: "transfer",
+ *   authorization: [{actor: "foo", permission: "active"}],
+ *   data: {
+ *     from: "foo",
+ *     to: "bar",
+ *     quantity: "42.0000 EOS",
+ *     memo: "Don't panic" }}
+ * ```
+ */
+// TODO
+/*export const PlaceholderName = '............1' // aka uint64(1)
+
+/** Placeholder that will resolve to signer permission name. */
+/*export const PlaceholderPermission = '............2' // aka uint64(2)
+
+export const PlaceholderAuth: abi.PermissionLevel = {
+    actor: PlaceholderName,
+    permission: PlaceholderPermission,
+}*/
+
     public class SigningRequestCreateArguments
     {
 
@@ -272,19 +303,17 @@ namespace EosioSigningRequest
         /** Chain to use, defaults to EOS main-net if omitted. */
         public string chainId;
 
-        /** Whether wallet should broadcastBit tx, defaults to true. */
+        /** Whether wallet should broadcast tx, defaults to true. */
         public bool? broadcast;
 
         /**
         * Optional callback URL the signer should hit after
-        * broadcasting or signing. Passing a string means backgroundBit = false.
+        * broadcasting or signing. Passing a string means background = false.
         */
         public CallbackType callback;
 
-        public string[] chainIds;
-
         /** Optional metadata to pass along with the request. */
-        public object info; // {[key: string]: string | Uint8Array}   // TODO
+        public object info; // TODO: {[key: string]: string | Uint8Array}   // TODO
         // Dictionary or string ?
     }
 
@@ -311,15 +340,21 @@ namespace EosioSigningRequest
         public string permission;
 
         /** Optional metadata to pass along with the request. */
-        public object info; // {[key: string]: string | Uint8Array}
+        public object info; // TODO ?: {[key: string]: string | Uint8Array}   // TODO
     }
 
     public class SigningRequestEncodingOptions
     {
+        /** UTF-8 text encoder, required when using node.js. */
+        //textEncoder?: any
+        /** UTF-8 text decoder, required when using node.js. */
+        //textDecoder?: any
+        
+        /** Optional zlib, if provided the request will be compressed when encoding. */
         public IZlibProvider zlib;
 
         /** Abi provider, required if the arguments contain un-encoded actions. */
-        public IAbiProvider abiProvider;
+        public IAbiProvider abiProvider;    // TODO make an Interface
         
         /** Optional signature provider, will be used to create a request signature if provided. */
         public ISignatureProvider signatureProvider;
@@ -327,53 +362,21 @@ namespace EosioSigningRequest
 
     public class SigningRequest
     {
-        public static AbiStruct type = EosioSigningRequestAbiData.Data.structs.SingleOrDefault(s => s.name == "signing_request");
-        public static AbiStruct idType = EosioSigningRequestAbiData.Data.structs.SingleOrDefault(s => s.name == "identity");
-        public static AbiStruct transactionType = EosioSigningRequestAbiData.Data.structs.SingleOrDefault(s => s.name == "transaction");
+        // TODO
+        /*public static type = AbiTypes.get('signing_request')!
+        public static idType = AbiTypes.get('identity')!
+        public static transactionType = AbiTypes.get('transaction')!*/
+
+        public static AbiType type;
+        public static AbiType idType;
+        public static AbiType transactionType;
 
         /** Create a new signing request. */
-        public static async Task<SigningRequest> create(SigningRequestCreateArguments args, SigningRequestEncodingOptions options = null) {
+        public static async Task<SigningRequest> create(SigningRequestCreateArguments args, SigningRequestEncodingOptions options) {
 
-            object[] actions;
-            if (args.action != null)
+            async Task<EosSharp.Core.Api.v1.Action> serialize(EosSharp.Core.Api.v1.Action action)
             {
-                actions = new[] {args.action};
-            }
-            else if (args.actions != null)
-            {
-                actions = args.actions;
-            }
-            else if (args.transaction != null)
-            {
-                actions = args.transaction.actions?.ToArray() ?? new object[] { };
-            }
-            else
-            {
-                actions = new object[0];
-            }
-
-            var requiredAbis = actions.Where(a => a is Action action && action.data is byte[]).Select(action => (action as Action)?.account).ToList();
-
-            Dictionary<string, Abi> abis = new AbiMap();
-            if (requiredAbis.Count > 0)
-            {
-                var provider = options?.abiProvider;
-                if (provider == null)
-                {
-                    throw new Exception("Missing abi provider");
-                }
-
-                abis = (await Task.WhenAll(requiredAbis.Select(async a =>
-                        new KeyValuePair<string, Abi>(a, await provider.GetAbi(a)))))
-                    .ToDictionary(a => a.Key, a => a.Value);
-            }
-
-            return await createSync(args, options, abis);
-
-
-/*          async Task<EosSharp.Core.Api.v1.Action> serialize(EosSharp.Core.Api.v1.Action action)
-            {
-                EosApi eosApi = new EosApi(new EosConfigurator(), new HttpHandler());    // TODO Unity-Specific HttpHandler
+                EosApi eosApi = new EosApi(new EosConfigurator(), null);    // TODO
 
                 var abi = (await eosApi.GetAbi(new GetAbiRequest() { account_name = action.account }, true)).abi;
                 AbiSerializationProvider abiSerializationProvider = new AbiSerializationProvider(eosApi);
@@ -381,7 +384,7 @@ namespace EosioSigningRequest
                 return action;
             }
 
-            SigningRequestData data = null;
+            SigningRequestData data = null;   // TODO, dynamics unsupported in unity
 
             // set the request data
             if (args.identity != null)
@@ -449,7 +452,7 @@ namespace EosioSigningRequest
 
                 // encode actions if needed
                 tx.actions = tx.actions.Select(async action => await serialize(action)).Select(t => t.Result).ToList();
-                data.req = new Tuple<string, object>("transaction", tx);
+                data.req = new Tuple<string, object>("transaction", tx);  // TODO !
             }
             else
             {
@@ -460,8 +463,8 @@ namespace EosioSigningRequest
             data.chain_id = Constants.variantId(args.chainId);
             data.flags = AbiConstants.RequestFlagsNone;
 
-            bool broadcastBit = args.broadcastBit ?? true;
-            if (broadcastBit)
+            bool broadcast = args.broadcast ?? true;
+            if (broadcast)
             {
                 data.flags |= AbiConstants.RequestFlagsBroadcast;
             }
@@ -469,9 +472,9 @@ namespace EosioSigningRequest
             if (args.callback is string callback)
             {
                 data.callback = callback;
-            } else if (args.callback is CallbackObj obj) {
+            } else if (args.callback is CallbackObj obj) {   // TODO, this is nothing else than a null-check
                 data.callback = obj.url;
-                if (obj.backgroundBit)
+                if (obj.background)
                 {
                     data.flags |= AbiConstants.RequestFlagsBackground;
                 }
@@ -505,202 +508,11 @@ namespace EosioSigningRequest
                 req.sign(options.signatureProvider);
             }
 
-            return req;*/
-        }
-
-        /**
- * Synchronously create a new signing request.
- * @throws If an un-encoded action with no abi def is encountered.
- */
-        public static async Task<SigningRequest> createSync(SigningRequestCreateArguments args, SigningRequestEncodingOptions options = null, Dictionary<string, Abi> abis = null)
-        {
-            var version = 2;
-            SigningRequestData data = new SigningRequestData();
-            //            Action<object> encode = new Action<object>((object action) => encodeAction(action, abis));
-
-            async Task<EosSharp.Core.Api.v1.Action> encode(EosSharp.Core.Api.v1.Action action)
-            {
-                EosApi eosApi = new EosApi(new EosConfigurator(), new HttpHandler());    // TODO Unity-Specific HttpHandler
-
-                var abi = (await eosApi.GetAbi(new GetAbiRequest() { account_name = action.account }, true)).abi;
-                AbiSerializationProvider abiSerializationProvider = new AbiSerializationProvider(eosApi);
-                action.data = abiSerializationProvider.SerializeActionData(action, abi);    // TODO hm. weird way ... 
-                return action;
-            }
-
-            // multi-chain requests requires version 3
-            if (args.chainId == null)
-            {
-                version = 3;
-            }
-
-            // set the request data
-            if (args.identity != null) {
-                if (args.identity.scope != null)
-                {
-                    version = 3;
-                }
-                data.req = new Tuple<string, object>("identity", args.identity);
-                // TODO            data.req = ['identity', this.identityType(version).from(args.identity)]
-            }
-            else if (args.action != null && args.actions == null && args.transaction == null)
-            {
-                data.req = new Tuple<string, object>("action", await encode(args.action));
-            }
-            else if (args.actions != null && args.action == null && args.transaction == null)
-            {
-                if (args.actions.Length == 1)
-                {
-                    data.req = new Tuple<string, object>("action", await encode(args.actions[0]));
-                }
-                else
-                {
-                    // TODO                 data.req = ['action[]', args.actions.map(encode)]
-                    data.req = new Tuple<string, object>("actions", args.actions.Select(async action => await encode(action)).Select(t => t.Result).ToArray());
-                }
-            }
-            // set the request data
-
-
-            else if (args.transaction != null && args.action == null && args.actions == null)
-            {
-                var tx = args.transaction;
-                // set default values if missing
-                if (tx.expiration == null)
-                {
-                    tx.expiration = new DateTime(1970, 1, 1);
-                }
-
-                if (tx.ref_block_num == null)
-                {
-                    tx.ref_block_num = 0;
-                }
-
-                if (tx.ref_block_prefix == null)
-                {
-                    tx.ref_block_prefix = 0;
-                }
-
-                if (tx.context_free_actions == null)
-                {
-                    tx.context_free_actions = new List<EosSharp.Core.Api.v1.Action>();
-                }
-
-                if (tx.transaction_extensions == null)
-                {
-                    tx.transaction_extensions = new List<EosSharp.Core.Api.v1.Extension>();
-                }
-
-                if (tx.delay_sec == null)
-                {
-                    tx.delay_sec = 0;
-                }
-
-                if (tx.max_cpu_usage_ms == null)
-                {
-                    tx.max_cpu_usage_ms = 0;
-                }
-
-                if (tx.max_net_usage_words == null)
-                {
-                    tx.max_net_usage_words = 0;
-                }
-
-                // encode actions if needed
-                tx.actions = tx.actions.Select(async action => await encode(action)).Select(t => t.Result).ToList();
-                data.req = new Tuple<string, object>("transaction", tx);
-            }
-            else
-            {
-                throw new Exception("Invalid arguments: Must have exactly one of action, actions or transaction");
-            }
-
-
-// TODO
-            // set the chain id
-//                if (args.chainId === null)
-//                {
-//                    data.chain_id = ChainIdVariant.from(['chain_alias', 0])
-//                }
-//                else
-//                {
-//                    data.chain_id = ChainId.from(args.chainId || ChainName.EOS).chainVariant
-//                }
-
-
-            // set the chain id
-            data.chain_id = Constants.variantId(args.chainId);
-            data.flags = new RequestFlags(AbiConstants.RequestFlagsNone);
-
-            data.flags.broadcast = (args.broadcast ?? data.req.Item1 != "identity");
-            if (args.callback is string callback)
-            {
-                data.callback = callback;
-            }
-            else if (args.callback is CallbackObj obj)
-            {
-                data.callback = obj.url;
-                if (obj.background)
-                {
-                    data.flags.background = (obj.background || false);
-                }
-            }
-            else
-            {
-                data.callback = "";
-            }
-
-            // info pairs
-            data.info = new List<InfoPair>();
-            if (args.info is Dictionary<string, string> dictionary)
-            {
-                foreach (var info in dictionary)
-                {
-                    data.info.Add(new InfoPair()
-                    {
-                        key = info.Key,
-                        value = info.Value
-                    });
-                }
-            }
-
-            if (args.chainIds != null && args.chainIds.Length > 0 && args.chainId == null)
-            {
-//                    const ids = args.chainIds.map((id) => ChainId.from(id).chainVariant)
-                var ids = args.chainIds.Select((id) => id);
-                data.info.Add(new InfoPair()
-                {
-                    key = "chain_ids",
-                    value = "" // Serializer.encode({ object: ids, type: { type: ChainIdVariant, array: true} }),
-                });
-            }
-
-            SigningRequest req = new SigningRequest(
-                Constants.ProtocolVersion,
-                data,
-                options.zlib,
-                options.abiProvider, //options.abiProvider
-                null
-            );
-
-            // sign the request if given a signature provider
-            if (options.signatureProvider != null)
-            {
-                req.sign(options.signatureProvider);
-            }
-
-            // sign the request if given a signature provider
-            if (options.signatureProvider != null)
-            {
-                req.sign(options.signatureProvider);
-            }
-
             return req;
         }
 
-
         /** Creates an identity request. */
-        public static async Task<SigningRequest> identity(SigningRequestCreateIdentityArguments args, SigningRequestEncodingOptions options)
+        public static SigningRequest identity(SigningRequestCreateIdentityArguments args, SigningRequestEncodingOptions options)
         {
             EosSharp.Core.Api.v1.PermissionLevel permission = new EosSharp.Core.Api.v1.PermissionLevel()
             {
@@ -713,13 +525,13 @@ namespace EosioSigningRequest
                 permission = null;
             }
 
-            return await create(new SigningRequestCreateArguments()
+            return create(new SigningRequestCreateArguments()
             {
                 identity = new Identity(){ permission = permission },
                 broadcast = false,
                 callback = args.callback,
                 info = args.info
-            }, options);
+            }, options).Result; // TODO async await + method async?
         }
 
         /**
@@ -850,10 +662,14 @@ namespace EosioSigningRequest
             RequestSignature signature
         ) 
         {
-
-            if (data.flags.broadcast && data.req.Item1 == "identity")
+            if ((data.flags & AbiConstants.RequestFlagsBroadcast) != 0 && data.req.Item1 == "identity")
             {
-                throw new Exception("Invalid request (identity request cannot be broadcastBit)");
+                throw new Exception("Invalid request (identity request cannot be broadcast)");
+            }
+
+            if ((data.flags & AbiConstants.RequestFlagsBroadcast) == 0 && data.callback.Length == 0)
+            {
+                throw new Exception("Invalid request (nothing to do, no broadcast or callback set)");
             }
 
             this.version = version;
@@ -870,7 +686,7 @@ namespace EosioSigningRequest
         public void sign(ISignatureProvider signatureProvider)
         {
             byte[] message = getSignatureDigest();
-            signature = signatureProvider.sign(SerializationHelper.ByteArrayToHexString(message));
+            signature = signatureProvider.sign(SerializationHelper.ByteArrayToHexString(message));// TODO
         }
 
         /**
@@ -908,21 +724,35 @@ namespace EosioSigningRequest
         /**
          * Set the request callback, mutating.
          * @param url Where the callback should be sent.
-         * @param backgroundBit Whether the callback should be sent in the backgroundBit.
+         * @param background Whether the callback should be sent in the background.
          */
         public void setCallback(string url, bool background)
         {
             this.data.callback = url;
-            this.data.flags.background = background;
+            if (background)
+            {
+                this.data.flags |= AbiConstants.RequestFlagsBackground;
+            }
+            else
+            {
+                this.data.flags &= ~AbiConstants.RequestFlagsBackground;
+            }
         }
 
         /**
-         * Set broadcastBit flag.
-         * @param broadcastBit Whether the transaction should be broadcastBit by receiver.
+         * Set broadcast flag.
+         * @param broadcast Whether the transaction should be broadcast by receiver.
          */
         public void setBroadcast(bool broadcast)
         {
-            this.data.flags.broadcast = broadcast;
+            if (broadcast)
+            {
+                this.data.flags |= AbiConstants.RequestFlagsBroadcast;
+            }
+            else
+            {
+                this.data.flags &= ~AbiConstants.RequestFlagsBroadcast;
+            }
         }
 
         /*
@@ -1020,7 +850,8 @@ namespace EosioSigningRequest
                 throw new Exception("Missing ABI provider");
             }
 
-            var abis = new Dictionary<string, Abi>();
+            var abis = new Dictionary<string, Abi>();    // TODO, how does Scatter do this?
+
             foreach (var account in getRequiredAbis())
             {
                 abis.Add(account, await provider.GetAbi(account));
@@ -1033,14 +864,15 @@ namespace EosioSigningRequest
          * @param abis ABI defenitions required to decode all actions.
          * @param signer Placeholders in actions will be resolved to signer if set.
          */
-        public ResolvedAction[] resolveActions(AbiMap abis, EosSharp.Core.Api.v1.PermissionLevel signer)
+        public EosSharp.Core.Api.v1.Action[] resolveActions(AbiMap abis, EosSharp.Core.Api.v1.PermissionLevel signer)
         {
             return getRawActions().Select(rawAction =>
             {
                 Abi contractAbi = null; //: any | undefined
                 if (Constants.isIdentity(rawAction))
                 {
-                    contractAbi = EosioSigningRequestAbiData.Data;
+                    // TODO
+//                    contractAbi = abi.data;
                 }
                 else
                 {
@@ -1073,14 +905,13 @@ namespace EosioSigningRequest
                     }
                 }*/
 
-                EosSharp.Core.Api.v1.Action action = new EosSharp.Core.Api.v1.Action()
-                {
-                    data = rawAction.data,
-                    account = rawAction.account,
-                    authorization = rawAction.authorization,
-                    name = rawAction.name,
-                    hex_data = rawAction.hex_data
-                };
+                EosSharp.Core.Api.v1.Action action = null; /*Serialize.deserializeAction(
+                    contractAbi,
+                    rawAction.account,
+                    rawAction.name,
+                    rawAction.authorization,
+                    rawAction.data
+                );*/
                 if (signer != null)
                 {
                     action.authorization = action.authorization.Select(auth =>
@@ -1111,16 +942,11 @@ namespace EosioSigningRequest
                     }).ToList();
                 }
 
-                return new ResolvedAction()
-                {
-                    authorization = action.authorization.ToArray(),
-                    name = action.name,
-                    account = action.account
-                };
+                return action;
             }).ToArray();
         }
 
-        public ResolvedTransaction resolveTransaction(AbiMap abis, EosSharp.Core.Api.v1.PermissionLevel signer, TransactionContext ctx)
+        public EosSharp.Core.Api.v1.Transaction resolveTransaction(AbiMap abis, EosSharp.Core.Api.v1.PermissionLevel signer, TransactionContext ctx)
         {
 
             TransactionHeader serializeTransactionHeader(TransactionContext ctx, uint expire_seconds)
@@ -1158,89 +984,23 @@ namespace EosioSigningRequest
                     throw new Exception("Invalid transaction context, need either a reference block or explicit TAPoS values");
                 }
             }
-            else if (this.isIdentity() && this.version > 2)
-            {
-                // From ESR version 3 all identity requests have expiration
-                tx.expiration = ctx.expiration ?? new DateTime();// TODO ?? expirationTime(ctx.timestamp, ctx.expire_seconds)
-            }
 
             var actions  = this.resolveActions(abis, signer);
-
-            return new ResolvedTransaction()
+            return new EosSharp.Core.Api.v1.Transaction()
             {
-                actions = actions,
-                context_free_actions = new ResolvedAction[0],
-                delay_sec = tx.delay_sec ?? 0,
-                expiration = tx.expiration,
-                max_cpu_usage_ms = tx.max_cpu_usage_ms ?? 0,
-                max_net_usage_words = tx.max_cpu_usage_ms ?? 0,
-                ref_block_num = tx.ref_block_num ?? 0,
-                ref_block_prefix = tx.ref_block_prefix ?? 0,
-                transaction_extensions = new object[0]
+                // TODO map other.
+                actions = actions.ToList()
             };
         }
 
-        public async Task<ResolvedSigningRequest> resolve(AbiMap abis, EosSharp.Core.Api.v1.PermissionLevel signer, TransactionContext ctx) {
-            var tx = resolveTransaction(abis, signer, ctx);
-
-            List<Action> actions = tx.actions.Select(action =>
-            {
-                Abi abi = null;
-                if (isIdentity(action))
-                {
-//                    abi = (this.constructor as typeof SigningRequest).identityAbi(this.version)
-                }
-                else
-                {
-                    abi = abis[action.account];
-                }
-
-                if (abi == null)
-                {
-                    throw new Exception($"Missing ABI definition for {action.account}");
-                }
-
-//                const type  = abi.getActionType(action.name)!
-//                const data  = Serializer.encode({ object: action.data, type, abi })
-                return new Action() { }; //.from({ ...action, data})
-            }).ToList();
-
-            var transaction = new Transaction()
-            {
-                actions = actions,
-                max_cpu_usage_ms = tx.max_cpu_usage_ms,
-                delay_sec = tx.delay_sec,
-                expiration = tx.expiration,
-                max_net_usage_words = tx.max_net_usage_words,
-                ref_block_num = tx.ref_block_num,
-                ref_block_prefix = tx.ref_block_prefix
-            };
-
-            string chainId;
-/*            if (this.isMultiChain())
-            {
-                if (!ctx.chainId)
-                {
-                    throw new Error('Missing chosen chain ID for multi-chain request')
-                }
-                chainId = ChainId.from(ctx.chainId)
-                const ids = this.getChainIds()
-                if (ids && !ids.some((id) => chainId.equals(id)))
-                {
-                    throw new Error('Trying to resolve for chain ID not defined in request')
-                }
-            }
-            else
-            {*/
-            chainId = this.getChainId();
-            //}
-
+        public ResolvedSigningRequest resolve(AbiMap abis, EosSharp.Core.Api.v1.PermissionLevel signer, TransactionContext ctx) {
+            EosSharp.Core.Api.v1.Transaction transaction = resolveTransaction(abis, signer, ctx);
 
             byte[] serializedTransaction = { };
             // TODO, overload SerializePackedTransaction with ABI-List
             if (abiProvider is AbiSerializationProvider) 
-                serializedTransaction = await ((AbiSerializationProvider)abiProvider).SerializePackedTransaction(transaction);
-            return new ResolvedSigningRequest(this, signer, transaction, tx, chainId);
+                serializedTransaction = ((AbiSerializationProvider)abiProvider).SerializePackedTransaction(transaction).Result;
+            return new ResolvedSigningRequest(this, signer, transaction, serializedTransaction);
         }
 
         /**
@@ -1286,7 +1046,7 @@ namespace EosioSigningRequest
                         /*idType.serialize(buf, req.Item2);
                         data = SerializationHelper.ByteArrayToHexString(buf.asUint8Array());*/
 
-                        AbiSerializationProvider s = new AbiSerializationProvider(null);    // TODO
+                        AbiSerializationProvider s = new AbiSerializationProvider(null);
                         // TODO serialize identity-request-type?
                         data = SerializationHelper.ByteArrayToHexString(new byte[] { });
 
@@ -1343,24 +1103,14 @@ namespace EosioSigningRequest
             return data.req.Item1 == "identity";
         }
 
-        bool isIdentity(Action action)
-        {
-            string account = action.account;
-            string name = action.name;
-            return /*account.rawValue.equals(0) &&*/ name.Equals("identity");
-        }
+        /** Whether the request should be broadcast by signer. */
+        public bool shouldBroadcast() {
+            if (isIdentity())
+            {
+                return false;
+            }
 
-        bool isIdentity(ResolvedAction action)
-        {
-            string account = action.account;
-            string name = action.name;
-            return /*account.rawValue.equals(0) &&*/ name.Equals("identity");
-        }
-
-        /** Whether the request should be broadcastBit by signer. */
-        public bool shouldBroadcast()
-        {
-            return !isIdentity() && data.flags.broadcast;
+            return (data.flags & AbiConstants.RequestFlagsBroadcast) != 0;
         }
 
         /**
@@ -1399,7 +1149,7 @@ namespace EosioSigningRequest
 
             foreach (var infoPair in data.info)
             {
-                rv.Add(infoPair.key, infoPair.value is string value ? SerializationHelper.HexStringToByteArray(value) : (byte[])infoPair.value);
+                rv.Add(infoPair.key, infoPair.value is string ? SerializationHelper.HexStringToByteArray((string)infoPair.value) : (byte[])infoPair.value);   // TODO 
             }
             return rv;
         }
@@ -1476,32 +1226,18 @@ namespace EosioSigningRequest
             );
         }
 
-        /**
-         * Present if the request is an identity request and requests a specific permission.
-         * @note This returns `nil` unless a specific permission has been requested,
-         *       use `isIdentity` to check id requests.
-         */
-        public string getIdentityScope() {
-            if (!this.isIdentity() || this.version <= 2)
-            {
-                return null;
-            }
-            var id = this.data.req.Item2 as Identity;
-            return id.scope;
+        // Convenience methods.
+
+        /*public string toString()
+        {
+            return this.encode();
         }
 
-    // Convenience methods.
-
-    /*public string toString()
-    {
-        return this.encode();
+        public object toJSON()  // TODO
+        {
+            return this.encode();
+        }*/
     }
-
-    public object toJSON()  // TODO
-    {
-        return this.encode();
-    }*/
-}
 
     public class ResolvedSigningRequest
     {
@@ -1509,7 +1245,7 @@ namespace EosioSigningRequest
         public static async Task<ResolvedSigningRequest> fromPayload(CallbackPayload payload, SigningRequestEncodingOptions options, IAbiProvider abiProvider) {
             SigningRequest request = SigningRequest.from(payload.req, options);
             var abis = await request.fetchAbis(abiProvider);
-            return await request.resolve(
+            return request.resolve(
                 abis,
                 new EosSharp.Core.Api.v1.PermissionLevel()
                 {
@@ -1525,24 +1261,22 @@ namespace EosioSigningRequest
             );
         }
 
-        /** The request that created the transaction. */
         public readonly SigningRequest request;
-        /** Expected signer of transaction. */
         public readonly EosSharp.Core.Api.v1.PermissionLevel signer;
-        /** Transaction object with action data encoded. */
         public readonly EosSharp.Core.Api.v1.Transaction transaction;
-        /** Transaction object with action data decoded. */
-        public readonly ResolvedTransaction resolvedTransaction;
-        /** Id of chain where the request was resolved. */
-        public readonly ChainId chainId;
+        public readonly byte[] serializedTransaction;
 
-        public ResolvedSigningRequest(SigningRequest request, EosSharp.Core.Api.v1.PermissionLevel signer, EosSharp.Core.Api.v1.Transaction transaction, ResolvedTransaction resolvedTransaction, string chainId)
+        public ResolvedSigningRequest(SigningRequest request, EosSharp.Core.Api.v1.PermissionLevel signer, EosSharp.Core.Api.v1.Transaction transaction, byte[] serializedTransaction)
         {
             this.request = request;
             this.signer = signer;
             this.transaction = transaction;
-            this.resolvedTransaction = resolvedTransaction;
-            this.chainId = chainId;
+            this.serializedTransaction = serializedTransaction;
+        }
+
+        public string getTransactionId()
+        {
+            return SerializationHelper.ByteArrayToHexString(Sha256Manager.GetHash(serializedTransaction));
         }
 
         public ResolvedCallback getCallback(string[] signatures, int? blockNum)
@@ -1564,10 +1298,10 @@ namespace EosioSigningRequest
             CallbackPayload payload = new CallbackPayload()
             {
                 sig = signatures[0],
-                //tx = getTransactionId(),
+                tx = getTransactionId(),
                 rbn = transaction.ref_block_num.ToString(),
                 rid = transaction.ref_block_prefix.ToString(),
-                ex = transaction.expiration,
+                ex = transaction.expiration.ToString(),
                 req = request.encode(),
                 sa = signer.actor,
                 sp = signer.permission,
@@ -1585,147 +1319,96 @@ namespace EosioSigningRequest
 
             return new ResolvedCallback()
             {
-                background = flags.background,
+                background = (flags & AbiConstants.RequestFlagsBackground) != 0,
                 payload = payload,
                 url = url
-            };
-        }
-
-        public IdentityProof getIdentityProof(SignatureType signature)
-        {
-            if (!this.request.isIdentity())
-            {
-                throw new Exception("Not a identity request");
-            }
-
-            return new IdentityProof()
-            {
-                chainId = this.chainId,
-                scope = this.request.getIdentityScope()!,
-                expiration = this.transaction.expiration,
-                signer = this.signer,
-                signature = signature as string
             };
         }
     }
 
     /** Internal helper that creates a contract representation from an abi for the eosjs serializer. */
-    /*function getContract(contractAbi: any): Serialize.Contract {
-        const types = Serialize.getTypesFromAbi(Serialize.createInitialTypes(), contractAbi)
-        const actions = new Map<string, Serialize.Type>()
-        for (const {name, type} of contractAbi.actions) {
-            actions.set(name, Serialize.getType(types, type))
-        }
-        return {types, actions}
+/*function getContract(contractAbi: any): Serialize.Contract {
+    const types = Serialize.getTypesFromAbi(Serialize.createInitialTypes(), contractAbi)
+    const actions = new Map<string, Serialize.Type>()
+    for (const {name, type} of contractAbi.actions) {
+        actions.set(name, Serialize.getType(types, type))
     }
+    return {types, actions}
+}
 
-    async function serializeAction(
-        action: abi.Action,
-        textEncoder: TextEncoder,
-        textDecoder: TextDecoder,
-        abiProvider?: AbiProvider
-    ) {
-        if (typeof action.data === 'string') {
-            return action
-        }
-        let contractAbi: any
-        if (isIdentity(action)) {
-            contractAbi = abi.data
-        } else if (abiProvider) {
-            contractAbi = await abiProvider.getAbi(action.account)
-        } else {
-            throw new Error('Missing abi provider')
-        }
-        const contract = getContract(contractAbi)
-        return Serialize.serializeAction(
-            contract,
-            action.account,
-            action.name,
-            action.authorization,
-            action.data,
-            textEncoder,
-            textDecoder
-        )
+async function serializeAction(
+    action: abi.Action,
+    textEncoder: TextEncoder,
+    textDecoder: TextDecoder,
+    abiProvider?: AbiProvider
+) {
+    if (typeof action.data === 'string') {
+        return action
     }
-
-    function variantId(chainId?: abi.ChainId | abi.ChainAlias): abi.VariantId {
-        if (!chainId) {
-            chainId = ChainName.EOS
-        }
-        if (typeof chainId === 'number') {
-            return ['chain_alias', chainId]
-        } else {
-            // resolve known chain id's to their aliases
-            const name = idToName(chainId)
-            if (name !== ChainName.UNKNOWN) {
-                return ['chain_alias', name]
-            }
-            return ['chain_id', chainId]
-        }
+    let contractAbi: any
+    if (isIdentity(action)) {
+        contractAbi = abi.data
+    } else if (abiProvider) {
+        contractAbi = await abiProvider.getAbi(action.account)
+    } else {
+        throw new Error('Missing abi provider')
     }
+    const contract = getContract(contractAbi)
+    return Serialize.serializeAction(
+        contract,
+        action.account,
+        action.name,
+        action.authorization,
+        action.data,
+        textEncoder,
+        textDecoder
+    )
+}
 
-    function isIdentity(action: abi.Action) {
-        return action.account === '' && action.name === 'identity'
+function variantId(chainId?: abi.ChainId | abi.ChainAlias): abi.VariantId {
+    if (!chainId) {
+        chainId = ChainName.EOS
     }
+    if (typeof chainId === 'number') {
+        return ['chain_alias', chainId]
+    } else {
+        // resolve known chain id's to their aliases
+        const name = idToName(chainId)
+        if (name !== ChainName.UNKNOWN) {
+            return ['chain_alias', name]
+        }
+        return ['chain_id', chainId]
+    }
+}
 
-    function hasTapos(tx: abi.Transaction) {
-        return !(
-            tx.expiration === '1970-01-01T00:00:00.000' &&
-            tx.ref_block_num === 0 &&
-            tx.ref_block_prefix === 0
-        )
-    }*/
+function isIdentity(action: abi.Action) {
+    return action.account === '' && action.name === 'identity'
+}
+
+function hasTapos(tx: abi.Transaction) {
+    return !(
+        tx.expiration === '1970-01-01T00:00:00.000' &&
+        tx.ref_block_num === 0 &&
+        tx.ref_block_prefix === 0
+    )
+}*/
 
     /** Resolve a chain id to a chain name alias, returns UNKNOWN (0x00) if the chain id has no alias. */
-    /*export function idToName(chainId: abi.ChainId): ChainName {
-        chainId = chainId.toLowerCase()
-        for (const [n, id] of ChainIdLookup) {
-            if (id === chainId) {
-                n
-            }
+/*export function idToName(chainId: abi.ChainId): ChainName {
+    chainId = chainId.toLowerCase()
+    for (const [n, id] of ChainIdLookup) {
+        if (id === chainId) {
+            n
         }
-        return ChainName.UNKNOWN
-    }*/
+    }
+    return ChainName.UNKNOWN
+}*/
 
     /** Resolve a chain name alias to a chain id. */
-    /*export function nameToId(chainName: ChainName): abi.ChainId {
-        return (
-            ChainIdLookup.get(chainName) ||
-            '0000000000000000000000000000000000000000000000000000000000000000'
-        )
-    }*/
-
-    public class ResolvedTransaction
-    {
-        /** The time at which a transaction expires. */
-        public DateTime expiration;
-        /** *Specifies a block num in the last 2^16 blocks. */
-        public ushort ref_block_num;
-        /** Specifies the lower 32 bits of the block id. */
-        public uint ref_block_prefix;
-        /** Upper limit on total network bandwidth (in 8 byte words) billed for this transaction. */
-        public uint max_net_usage_words;
-        /** Upper limit on the total CPU time billed for this transaction. */
-        public byte max_cpu_usage_ms;
-        /** Number of seconds to delay this transaction for during which it may be canceled. */
-        public uint delay_sec;
-        /** The context free actions in the transaction. */
-        public ResolvedAction[] context_free_actions;
-        /** The actions in the transaction. */
-        public ResolvedAction[] actions;
-        /** Transaction extensions. */
-        public object[] transaction_extensions;
-    }
-
-    public class ResolvedAction
-    {
-        /** The account (a.k.a. contract) to run action on. */
-        public string account;
-        /** The name of the action. */
-        public string name;
-        /** The permissions authorizing the action. */
-        public PermissionLevel[] authorization;
-        /** The decoded action data. */
-        public Dictionary<string, object> data;
-    }
+/*export function nameToId(chainName: ChainName): abi.ChainId {
+    return (
+        ChainIdLookup.get(chainName) ||
+        '0000000000000000000000000000000000000000000000000000000000000000'
+    )
+}*/
 }
