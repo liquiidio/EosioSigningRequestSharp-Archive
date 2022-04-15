@@ -3,6 +3,7 @@
  */
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -10,26 +11,23 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Cryptography.ECDSA;
+using EosSharp;
 using EosSharp.Core;
 using EosSharp.Core.Api.v1;
 using EosSharp.Core.Helpers;
+using EosSharp.Core.Interfaces;
 using EosSharp.Core.Providers;
 
 using CallbackType = System.Object; // TODO export type CallbackType = string | {url: string; background: boolean}*/
 using AbiMap = System.Collections.Generic.Dictionary<string, EosSharp.Core.Api.v1.Abi>; //     export type AbiMap = Map<string, any>
-using RequestFlags = System.Int32;  //number;  // TODO
+using RequestFlags = System.Byte;  //number;  // TODO
 using ChainId = System.String; /*checksum256*/
-using VariantId = System.Tuple<string, object>;
+using VariantId = System.Collections.Generic.KeyValuePair<string, object>;
 using Newtonsoft.Json;
+using Action = EosSharp.Core.Api.v1.Action;
 
 namespace EosioSigningRequest
 {
-    public class CallbackObj
-    {
-        public string url;
-        public bool background;
-    }
-
     public static class Constants
     {
         public static Dictionary<ChainName, string> ChainIdLookup = new Dictionary<ChainName, string>() {
@@ -74,21 +72,19 @@ namespace EosioSigningRequest
             {
                 chainId = ChainName.EOS;
             }
-            if (chainId is int)
+            if (chainId is byte)
             {
                 return new VariantId("chain_alias", chainId);
-//                return ['chain_alias', chainId]   // TODO ?
-            } else
+            }
+            if(chainId is string chainIdString && Enum.TryParse(chainIdString, out ChainName chainIdEnum))
             {
                 // resolve known chain id's to their aliases
-                string name = "EOS";// TODO SerializationHelper.idToName(chainId);
-                if (name != "")// TODO ? ChainName.UNKNOWN)
+                if ((ChainName)chainIdEnum != ChainName.UNKNOWN)
                 {
-                    return new VariantId("chain_id", name);
+                    return new VariantId("chain_id", Constants.ChainIdLookup[(ChainName)chainIdEnum]);
                 }
-
-                return new VariantId("chain_id", chainId);
             }
+            return new VariantId("chain_alias", chainId);
         }
 
         public static string nameToId(long id)
@@ -129,11 +125,11 @@ namespace EosioSigningRequest
     }
 
     /** Interface that should be implemented by signature providers. */
-    public interface ISignatureProvider
-    {
-        /** Sign 32-byte hex-encoded message and return signer name and signature string. */
-        RequestSignature sign(string message);// => {signer: string; signature: string}  // TODO
-    }
+    //public interface ISignatureProvider
+    //{
+    //    /** Sign 32-byte hex-encoded message and return signer name and signature string. */
+    //    RequestSignature sign(string message);// => {signer: string; signature: string}  // TODO
+    //}
 
     /**
      * The callback payload sent to background callbacks.
@@ -211,10 +207,10 @@ namespace EosioSigningRequest
         public uint? expire_seconds;
 
         /** Block number ref_block_num will be derived from. */
-        public uint? block_num;
+        public ushort? block_num;
 
         /** Reference block number, takes precedence over block_num if both is set. */
-        public uint? ref_block_num;
+        public ushort? ref_block_num;
 
         /** Reference block prefix. */
         public uint? ref_block_prefix;
@@ -298,7 +294,7 @@ export const PlaceholderAuth: abi.PermissionLevel = {
         public EosSharp.Core.Api.v1.Transaction transaction;
 
         /** Create an identity request. */
-        public Identity identity;
+        public IdentityV2 Identity;
 
         /** Chain to use, defaults to EOS main-net if omitted. */
         public string chainId;
@@ -357,73 +353,62 @@ export const PlaceholderAuth: abi.PermissionLevel = {
         public IAbiProvider abiProvider;    // TODO make an Interface
         
         /** Optional signature provider, will be used to create a request signature if provided. */
-        public ISignatureProvider signatureProvider;
+        public ISignProvider signatureProvider;
     }
 
-    public class SigningRequest
+    public partial class SigningRequest
     {
         // TODO
         /*public static type = AbiTypes.get('signing_request')!
         public static idType = AbiTypes.get('identity')!
         public static transactionType = AbiTypes.get('transaction')!*/
 
-        public static AbiType type;
-        public static AbiType idType;
-        public static AbiType transactionType;
+        public static AbiStruct type = SigningRequestAbi.Abi.structs.FirstOrDefault(s => s.name == "signing_request");
+        public static AbiStruct idType = SigningRequestAbi.Abi.structs.FirstOrDefault(s => s.name == "identity");
+        public static AbiStruct transactionType = SigningRequestAbi.Abi.structs.FirstOrDefault(s => s.name == "transaction");
 
         /** Create a new signing request. */
         public static async Task<SigningRequest> create(SigningRequestCreateArguments args, SigningRequestEncodingOptions options) {
 
             async Task<EosSharp.Core.Api.v1.Action> serialize(EosSharp.Core.Api.v1.Action action)
             {
-                EosApi eosApi = new EosApi(new EosConfigurator(), null);    // TODO
+                if (string.IsNullOrEmpty(action.hex_data))
+                {
+                    EosApi eosApi = new EosApi(new EosConfigurator() { HttpEndpoint = "http://eos.api.eosnation.io" }, new HttpHandler());    // TODO
 
-                var abi = (await eosApi.GetAbi(new GetAbiRequest() { account_name = action.account }, true)).abi;
-                AbiSerializationProvider abiSerializationProvider = new AbiSerializationProvider(eosApi);
-                action.data = abiSerializationProvider.SerializeActionData(action, abi);    // TODO hm. weird way ... 
+                    var abi = (await eosApi.GetAbi(new GetAbiRequest() { account_name = action.account }, true)).abi;
+                    AbiSerializationProvider abiSerializationProvider = new AbiSerializationProvider(eosApi);
+                    action.hex_data = SerializationHelper.ByteArrayToHexString(abiSerializationProvider.SerializeActionData(action, abi));    // TODO hm. weird way ...                     
+                }
                 return action;
             }
 
-            SigningRequestData data = null;   // TODO, dynamics unsupported in unity
+            SigningRequestData data = new SigningRequestData();
 
             // set the request data
-            if (args.identity != null)
+            if (args.Identity != null)
             {
-                data.req = new Tuple<string, object>("identity",args.identity);
+                data.req = new ("identity",args.Identity);
             }
             else if (args.action != null && args.actions == null && args.transaction == null)
             {
-                data.req = new Tuple<string, object>("action", await serialize(args.action));
+                data.req = new ("action", await serialize(args.action));
             }
             else if (args.actions != null && args.action == null && args.transaction == null)
             {
                 if (args.actions.Length == 1)
                 {
-                    data.req = new Tuple<string, object>("action", await serialize(args.actions[0]));
+                    data.req = new ("action", await serialize(args.actions[0]));
                 }
                 else
                 {
-                    data.req = new Tuple<string, object>("actions", args.actions.Select(async action => await serialize(action)).Select(t => t.Result).ToArray());
+                    data.req = new ("action[]", args.actions.Select(async action => await serialize(action)).Select(t => t.Result).ToArray());
                 }
             }
             else if (args.transaction != null && args.action == null && args.actions == null)
             {
                 var tx = args.transaction;
                 // set default values if missing
-                if (tx.expiration == null)
-                {
-                    tx.expiration = new DateTime(1970, 1, 1);
-                }
-
-                if (tx.ref_block_num == null)
-                {
-                    tx.ref_block_num = 0;
-                }
-
-                if (tx.ref_block_prefix == null)
-                {
-                    tx.ref_block_prefix = 0;
-                }
 
                 if (tx.context_free_actions == null)
                 {
@@ -435,24 +420,9 @@ export const PlaceholderAuth: abi.PermissionLevel = {
                     tx.transaction_extensions = new List<EosSharp.Core.Api.v1.Extension>();
                 }
 
-                if (tx.delay_sec == null)
-                {
-                    tx.delay_sec = 0;
-                }
-
-                if (tx.max_cpu_usage_ms == null)
-                {
-                    tx.max_cpu_usage_ms = 0;
-                }
-
-                if (tx.max_net_usage_words == null)
-                {
-                    tx.max_net_usage_words = 0;
-                }
-
                 // encode actions if needed
                 tx.actions = tx.actions.Select(async action => await serialize(action)).Select(t => t.Result).ToList();
-                data.req = new Tuple<string, object>("transaction", tx);  // TODO !
+                data.req = new ("transaction", tx);  // TODO !
             }
             else
             {
@@ -463,7 +433,10 @@ export const PlaceholderAuth: abi.PermissionLevel = {
             data.chain_id = Constants.variantId(args.chainId);
             data.flags = AbiConstants.RequestFlagsNone;
 
-            bool broadcast = args.broadcast ?? true;
+//            bool broadcast = args.broadcast ?? args.broadcast : data.req.Key != "identity";
+
+
+            bool broadcast = args.broadcast ?? data.req.Key != "identity";
             if (broadcast)
             {
                 data.flags |= AbiConstants.RequestFlagsBroadcast;
@@ -472,17 +445,20 @@ export const PlaceholderAuth: abi.PermissionLevel = {
             if (args.callback is string callback)
             {
                 data.callback = callback;
-            } else if (args.callback is CallbackObj obj) {   // TODO, this is nothing else than a null-check
-                data.callback = obj.url;
-                if (obj.background)
+            }
+            else if (args.callback is KeyValuePair<string, bool> obj)
+            {
+                data.callback = obj.Key;
+                if (obj.Value)
                 {
                     data.flags |= AbiConstants.RequestFlagsBackground;
                 }
-            } else {
+            }
+            else {
                 data.callback = "";
             }
 
-            data.info = new List<InfoPair>();
+            data.info = new List<object>();
             if (args.info is Dictionary<string, string> dictionary) {
                 foreach (var info in dictionary)
                 {
@@ -498,7 +474,7 @@ export const PlaceholderAuth: abi.PermissionLevel = {
                 Constants.ProtocolVersion,
                 data,
                 options.zlib,
-                null,//options.abiProvider
+                options.abiProvider,
                 null
             );
 
@@ -524,10 +500,9 @@ export const PlaceholderAuth: abi.PermissionLevel = {
             {
                 permission = null;
             }
-
             return create(new SigningRequestCreateArguments()
             {
-                identity = new Identity(){ permission = permission },
+                Identity = new IdentityV2(){ permission = permission },
                 broadcast = false,
                 callback = args.callback,
                 info = args.info
@@ -557,15 +532,15 @@ export const PlaceholderAuth: abi.PermissionLevel = {
             {
                 buf.WriteByte(2); // header
                 var id= Constants.variantId(chainId);
-                if (id.Item1 == "chain_alias")
+                if (id.Key == "chain_alias")
                 {
                     buf.WriteByte(0);
-                    buf.WriteByte(Convert.ToByte((int)id.Item2));
+                    buf.WriteByte(Convert.ToByte((int)id.Value));
                 }
                 else
                 {
                     buf.WriteByte(1);
-                    byte[] bytes = SerializationHelper.HexStringToByteArray((string)id.Item2);
+                    byte[] bytes = SerializationHelper.HexStringToByteArray((string)id.Value);
                     buf.Write(bytes, 0, bytes.Length);
                 }
 
@@ -590,7 +565,13 @@ export const PlaceholderAuth: abi.PermissionLevel = {
                 throw new Exception("Invalid scheme");
             }
 
-            byte[] data = Convert.FromBase64String(path.StartsWith("//") ? path.Substring(2) : path);
+            path = path.StartsWith("//") ? path.Substring(2) : path;
+            if (path.Length % 4 != 0 && !path.EndsWith(padding.ToString()))
+                path += padding;
+            path = path.Replace('-', '+').Replace('_', '/');
+            
+            Console.WriteLine(path);
+            byte[] data = Convert.FromBase64String(path);
             return fromData(data, options);
         }
 
@@ -602,8 +583,8 @@ export const PlaceholderAuth: abi.PermissionLevel = {
                 throw new Exception("Unsupported protocol version");
             }
 
-            byte[] array = new byte[data.Length-1]; 
-            data.CopyTo(array, 1);
+            byte[] array = new byte[data.Length-1];
+            Array.Copy(data, 1, array, 0, data.Length-1);
             
             if ((header & (1 << 7)) != 0)
             {
@@ -615,24 +596,35 @@ export const PlaceholderAuth: abi.PermissionLevel = {
                 array = options.zlib.inflateRaw(array);
             }
 
+            var serializationProvider = new AbiSerializationProvider();
 
-            // TODO !
-
-            var req = new SigningRequestData();
-            var signature = new RequestSignature();
-
-/*            var req = type.deserialize(buffer); // array to buffer
-            var signature = new RequestSignature();
-
-            if (buffer.haveReadData())
+            int readIndex = 0;
+            var requestData = serializationProvider.DeserializeStructData<SigningRequestData>("signing_request", array, SigningRequestAbi.Abi, ref readIndex);
+            var val = (Dictionary<string, object>)requestData.req.Value;
+            if (val.ContainsKey("data"))
             {
-                const type = AbiTypes.get("request_signature")!;
-                signature = type.deserialize(buffer);
-            }*/
+                val.Add("hex_data", SerializationHelper.ByteArrayToHexString((byte[])val["data"]));
+                //val.Remove("data");
+            }
+
+            RequestSignature signature = null;
+            if (readIndex < array.Length)
+            {
+                signature = serializationProvider.DeserializeStructData<RequestSignature>("request_signature", array, SigningRequestAbi.Abi, ref readIndex);
+            }
+
+            /*            var req = type.deserialize(buffer); // array to buffer
+                        var signature = new RequestSignature();
+
+                        if (buffer.haveReadData())
+                        {
+                            const type = AbiTypes.get("request_signature")!;
+                            signature = type.deserialize(buffer);
+                        }*/
 
             return new SigningRequest(
                 version,
-                req,
+                requestData,
                 options.zlib,
                 options.abiProvider,
                 signature
@@ -640,7 +632,7 @@ export const PlaceholderAuth: abi.PermissionLevel = {
         }
 
         /** The signing request version. */
-        public byte version;
+        public byte version = 1;
 
         /** The raw signing request data. */
         public SigningRequestData data;
@@ -662,7 +654,7 @@ export const PlaceholderAuth: abi.PermissionLevel = {
             RequestSignature signature
         ) 
         {
-            if ((data.flags & AbiConstants.RequestFlagsBroadcast) != 0 && data.req.Item1 == "identity")
+            if ((data.flags & AbiConstants.RequestFlagsBroadcast) != 0 && data.req.Key == "identity")
             {
                 throw new Exception("Invalid request (identity request cannot be broadcast)");
             }
@@ -683,10 +675,15 @@ export const PlaceholderAuth: abi.PermissionLevel = {
          * Sign the request, mutating.
          * @param signatureProvider The signature provider that provides a signature for the signer.
          */
-        public void sign(ISignatureProvider signatureProvider)
+        public void sign(ISignProvider signatureProvider)
         {
             byte[] message = getSignatureDigest();
-            signature = signatureProvider.sign(SerializationHelper.ByteArrayToHexString(message));// TODO
+            var signatureData = signatureProvider.Sign();
+            signature = new RequestSignature()
+            {
+                signer = signatureData["signer"],
+                signature = signatureData["signature"] //signatureProvider.Sign(getChainId(), message),
+            };
         }
 
         /**
@@ -735,7 +732,7 @@ export const PlaceholderAuth: abi.PermissionLevel = {
             }
             else
             {
-                this.data.flags &= ~AbiConstants.RequestFlagsBackground;
+                this.data.flags = ((byte)(this.data.flags &  ~AbiConstants.RequestFlagsBackground));
             }
         }
 
@@ -751,7 +748,7 @@ export const PlaceholderAuth: abi.PermissionLevel = {
             }
             else
             {
-                this.data.flags &= ~AbiConstants.RequestFlagsBroadcast;
+                this.data.flags = ((byte)(this.data.flags & ~AbiConstants.RequestFlagsBroadcast));
             }
         }
 
@@ -764,6 +761,7 @@ export const PlaceholderAuth: abi.PermissionLevel = {
          *                   Defaults to true.
          * @returns An esr uri string.
          */
+        static readonly char padding =  '=';
         public string encode(bool? compress = null, bool? slashes = null)
         {
             bool shouldCompress = compress ?? this.zlib != null;
@@ -778,49 +776,86 @@ export const PlaceholderAuth: abi.PermissionLevel = {
             byte[] array = new byte[data.Length + sigData.Length];
             data.CopyTo(array,0);
             sigData.CopyTo(array, data.Length);
-/*            if (shouldCompress)
+            if (shouldCompress)
             {
-                const deflated = zlib!.deflateRaw(array);
-                if (array.Length > deflated.byteLength)
+                var deflated = zlib!.deflateRaw(array);
+                if (array.Length > deflated.Length)
                 {
-                    header |= 1 << 7
-                    array = deflated
+                    header |= 1 << 7;
+                    array = deflated;
                 }
-            }*/
+            }
 
-            byte[] @out = new byte[1 + array.Length];
-            @out[0] = header;
-            array.CopyTo(@out, 1);
+            byte[] output = new byte[1 + array.Length];
+            output[0] = header;
+            array.CopyTo(output, 1);
             string scheme = "esr:";
             if (slashes != false)
             {
                 scheme += "//";
             }
 
-            return scheme + Convert.ToBase64String(@out);
+            return scheme + Convert.ToBase64String(output).TrimEnd(padding).Replace('+', '-').Replace('/', '_');
         }
 
         /** Get the request data without header or signature. */
         public byte[] getData()
         {
-            // TODO
-            /*type.serialize(buffer, data);
-            return buffer.asUint8Array();*/
-            return new byte[]{};
-    }
+            if (data.req.Key == "action")
+            {
+                if (data.req.Value is Action action)
+                {
+                    ((Action)data.req.Value).data = SerializationHelper.HexStringToByteArray(action.hex_data);
+                }
+                else if (data.req.Value is Dictionary<string, object> dict)
+                {
+                    var auth = (List<object>)dict["authorization"];
+
+                    var authorization = new List<PermissionLevel>();
+                    foreach (Dictionary<string, object> permLevel in auth)
+                    {
+                        authorization.Add(new PermissionLevel()
+                            { actor = (string)permLevel["actor"], permission = (string)permLevel["permission"] });
+                    }
+
+                    data.req = new KeyValuePair<string, object>(data.req.Key,
+                        new Action()
+                        {
+                            data = dict["data"],
+                            authorization = authorization,
+                            name = (string)dict["name"],
+                            account = (string)dict["account"]
+                        }
+                    );
+                }
+                else
+                {
+                    throw new Exception($"type {data.req.Value.GetType().Name} not supported");
+                }
+            }
+            else if (data.req.Key == "action[]")
+            {
+                throw new NotImplementedException();
+            }
+            else
+            {
+                throw new NotSupportedException($"{data.req.Key} not supported");
+            }
+
+            var serializationProvider = new AbiSerializationProvider();
+            return serializationProvider.SerializeStructData(data, type, SigningRequestAbi.Abi);
+        }
 
         /** Get signature data, returns an empty array if request is not signed. */
         public byte[] getSignatureData() {
             if (signature == null)
             {
-                return new byte[0];
+                return Array.Empty<byte>();
             }
 
-            return new byte[]{};
-            // TODO
-/*            const type = AbiTypes.get("request_signature")!;
-            type.serialize(buffer, signature);
-            return buffer.asUint8Array();*/
+            var structType = SigningRequestAbi.Abi.structs.FirstOrDefault(t => t.name == "request_signature")!;
+            var serializationProvider = new AbiSerializationProvider();
+            return serializationProvider.SerializeStructData(signature, structType, SigningRequestAbi.Abi);
         }
 
         /** ABI definitions required to resolve request. */
@@ -868,11 +903,38 @@ export const PlaceholderAuth: abi.PermissionLevel = {
         {
             return getRawActions().Select(rawAction =>
             {
+//                Abi abi;
+//                if (Constants.isIdentity(rawAction))
+//                {
+//                    abi = SigningRequestAbi.Abi;//(this.constructor as typeof SigningRequest).identityAbi(this.version)
+//                }
+//                else
+//                {
+//                    if (!abis.ContainsKey(rawAction.account))
+//                    {
+//                        throw new Exception($"Missing ABI definition for {rawAction.account}");
+//                    }
+//                    abi = abis[rawAction.account];
+////                    abi = ABI.from(rawAbi)
+//                }
+//                if (abi.actions.All(a => a.name != rawAction.name)) {
+//                    throw new Exception($"Missing type for action ${ rawAction.account}:{rawAction.name} in ABI"")
+//                }
+
+//                var type = abi.actions.FirstOrDefault(a => a.name == rawAction.name);
+
                 Abi contractAbi = null; //: any | undefined
                 if (Constants.isIdentity(rawAction))
                 {
-                    // TODO
-//                    contractAbi = abi.data;
+                    contractAbi = SigningRequestAbi.Abi;
+                    rawAction.account = "";
+                    rawAction.data = new Dictionary<string, object>()
+                    {
+                        { "actor", signer.actor },
+                        { "permission", signer.permission },
+                    };
+                    rawAction.authorization = new List<PermissionLevel>(){ signer };
+                    rawAction.name = "identity";
                 }
                 else
                 {
@@ -884,46 +946,47 @@ export const PlaceholderAuth: abi.PermissionLevel = {
                     throw new Exception($"Missing ABI definition for {rawAction.account}");
                 }
 
-/*                if (signer != null)
+                if (signer != null)
                 {
-                    // hook into eosjs name decoder and return the signing account if we encounter the placeholder
-                    // this is fine because getContract re-creates the initial types each time
-                    contractAbi.types.get("name")!.deserialize = (buffer: Serialize.SerialBuffer) => {
-                        string name = buffer.getName();
-                        if (name == Constants.PlaceholderName)
+                    foreach (var auth in rawAction.authorization)
+                    {
+                        if ((auth.actor == Constants.PlaceholderName || auth.actor == null) && signer.actor != null)  
                         {
-                            return signer.actor;
+                            auth.actor = signer.actor;
                         }
-                        else if (name == Constants.PlaceholderPermission)
+
+                        if ((auth.permission == Constants.PlaceholderPermission || auth.permission == null) && signer.permission != null)
                         {
-                            return signer.permission;
-                        }
-                        else
-                        {
-                            return name;
+                            auth.permission = signer.permission;
                         }
                     }
-                }*/
+                    
+                    if (rawAction.data is Dictionary<string, object> dataDict)
+                    {
+                        ReplacePlaceholders(dataDict, signer);
+                    }
+                }
 
-                EosSharp.Core.Api.v1.Action action = null; /*Serialize.deserializeAction(
-                    contractAbi,
-                    rawAction.account,
-                    rawAction.name,
-                    rawAction.authorization,
-                    rawAction.data
-                );*/
+                EosSharp.Core.Api.v1.Action action = new Action()
+                {
+                    account = rawAction.account,
+                    name = rawAction.name,
+                    authorization = rawAction.authorization,
+                    data = rawAction.data
+                };
+
                 if (signer != null)
                 {
                     action.authorization = action.authorization.Select(auth =>
                     {
                         string actor = auth.actor;
                         string permission = auth.permission;
-                        if (actor == Constants.PlaceholderName)
+                        if (actor == Constants.PlaceholderName || actor == null)
                         {
                             actor = signer.actor;
                         }
 
-                        if (permission == Constants.PlaceholderPermission)
+                        if (permission == Constants.PlaceholderPermission || permission == null)
                         {
                             permission = signer.permission;
                         }
@@ -946,19 +1009,45 @@ export const PlaceholderAuth: abi.PermissionLevel = {
             }).ToArray();
         }
 
-        public EosSharp.Core.Api.v1.Transaction resolveTransaction(AbiMap abis, EosSharp.Core.Api.v1.PermissionLevel signer, TransactionContext ctx)
+        private void ReplacePlaceholders(Dictionary<string, object> dataDict, PermissionLevel signer)
+        {
+            foreach (var dataDictKey in dataDict.Keys)
+            {
+                if (dataDict[dataDictKey] is string sVal)
+                {
+                    if (sVal == Constants.PlaceholderName && signer.actor != null)
+                    {
+                        dataDict[dataDictKey] = signer.actor;
+                    }
+                    else if (sVal == Constants.PlaceholderPermission && signer.permission != null)
+                    {
+                        dataDict[dataDictKey] = signer.permission;
+                    }
+                }
+                else if (dataDict[dataDictKey] is PermissionLevel pVal && pVal == Constants.PlaceholderAuth && signer.permission != null && signer.actor != null)
+                {
+                    dataDict[dataDictKey] = signer;
+                }
+                else if(dataDict[dataDictKey] is Dictionary<string, object> innerDataDict)
+                {
+                    ReplacePlaceholders(innerDataDict, signer);
+                }
+            }
+        }
+
+        public EosSharp.Core.Api.v1.Transaction resolveTransaction(AbiMap abis, EosSharp.Core.Api.v1.PermissionLevel signer, TransactionContext ctx = null/*TODO null?*/)
         {
 
             TransactionHeader serializeTransactionHeader(TransactionContext ctx, uint expire_seconds)
             {
 
-                uint prefix = 1;//SerializationHelper.ReverseHex(ctx.) -- parseInt(reverseHex(refBlock.id.substr(16, 8)), 16);
+                uint prefix = 1;//SerializationHelper.ReverseHex(ctx.) -- parseInt(reverseHex(refBlock.id.substr(16, 8)), 16); // TODO
 
                 TransactionHeader transactionHeader = new TransactionHeader()
                 {
                     expiration = ctx.timestamp.Value.AddSeconds(expire_seconds),
                     ref_block_num = Convert.ToUInt16(ctx.ref_block_num & 0xffff),
-                    ref_block_prefix = prefix
+                    ref_block_prefix = prefix // TODO
                 };
                 return transactionHeader;
             }
@@ -969,15 +1058,15 @@ export const PlaceholderAuth: abi.PermissionLevel = {
                 if (ctx.expiration != null && ctx.ref_block_num != null && ctx.ref_block_prefix != null)
                 {
                     tx.expiration = ctx.expiration.Value;// TODO !!!
-                    tx.ref_block_num = Convert.ToUInt16(ctx.ref_block_num.Value);
+                    tx.ref_block_num = ctx.ref_block_num.Value;
                     tx.ref_block_prefix = ctx.ref_block_prefix.Value;
                 }
                 else if (ctx.block_num != null && ctx.ref_block_prefix != null && ctx.timestamp != null)
                 {
                     var header  = serializeTransactionHeader(ctx, ctx.expire_seconds ?? 60);
                     tx.expiration = header.expiration.Value;
-                    tx.ref_block_num = Convert.ToUInt16(header.ref_block_num.Value);
-                    tx.ref_block_prefix = header.ref_block_prefix.Value;
+                    tx.ref_block_num = ctx.block_num.Value;//Convert.ToUInt16(header.ref_block_num.Value);
+                    tx.ref_block_prefix = ctx.ref_block_prefix.Value;//header.ref_block_prefix.Value;
                 }
                 else
                 {
@@ -988,8 +1077,15 @@ export const PlaceholderAuth: abi.PermissionLevel = {
             var actions  = this.resolveActions(abis, signer);
             return new EosSharp.Core.Api.v1.Transaction()
             {
-                // TODO map other.
-                actions = actions.ToList()
+                actions = actions.ToList(),
+                context_free_actions = new List<Action>(), // TODO ?,
+                delay_sec = tx.delay_sec, // TODO ?
+                expiration = tx.expiration,
+                max_cpu_usage_ms = tx.max_cpu_usage_ms, // TODO ?
+                max_net_usage_words = tx.max_net_usage_words, // TODO ?
+                ref_block_num = tx.ref_block_num,
+                ref_block_prefix = tx.ref_block_prefix,
+                transaction_extensions = new List<Extension>() // TODO ?
             };
         }
 
@@ -1009,14 +1105,14 @@ export const PlaceholderAuth: abi.PermissionLevel = {
          */
         public ChainId getChainId() {
             var id= data.chain_id;
-            switch (id.Item1)
+            switch (id.Key)
             {
                 case "chain_id":
-                    return (string)id.Item2;
+                    return (string)id.Value;
                 case "chain_alias":
-                    if (Constants.ChainIdLookup.ContainsKey((ChainName)id.Item2))
+                    if (Constants.ChainIdLookup.ContainsKey((ChainName)id.Value))
                     {
-                        return Constants.ChainIdLookup[(ChainName)id.Item2];
+                        return Constants.ChainIdLookup[(ChainName)id.Value];
                     }
                     else
                     {
@@ -1031,16 +1127,42 @@ export const PlaceholderAuth: abi.PermissionLevel = {
         public EosSharp.Core.Api.v1.Action[] getRawActions()
         {
             var req = this.data.req;
-            switch (req.Item1)
+            switch (req.Key)
             {
                 case "action":
-                    return new[] {(EosSharp.Core.Api.v1.Action)req.Item2};
+                    if (req.Value is Action act)
+                    {
+                        return new[] { act };
+                    }
+                    else if (req.Value is Dictionary<string, object> dict)
+                    {
+                        var auth = (List<object>)dict["authorization"];
+                        return new Action[]
+                        {
+                            new Action()
+                            {
+                                data = dict["data"],
+                                authorization = new List<PermissionLevel>()
+                                {
+                                    new PermissionLevel()
+                                    {
+                                        //actor = (string)auth.FirstOrDefault(a => a.Key == "actor").Value,
+                                        //permission = (string)auth.FirstOrDefault(a => a.Key == "permission").Value
+                                    }
+                                },
+                                name = (string)dict["name"],
+                                account = (string)dict["account"]
+                            }
+                        };
+                    }
+                    else
+                        throw new Exception("unsupported type for data.req");
                 case "action[]":
-                    return (EosSharp.Core.Api.v1.Action[]) req.Item2;
+                    return (EosSharp.Core.Api.v1.Action[]) req.Value;
                 case "identity":
                     string data = "0101000000000000000200000000000000"; // placeholder permission
                     EosSharp.Core.Api.v1.PermissionLevel authorization = Constants.PlaceholderAuth;
-                    if (((Identity)req.Item2).permission != null)
+                    if (((IdentityV2)req.Value).permission != null)
                     {
                         // TODO
                         /*idType.serialize(buf, req.Item2);
@@ -1050,7 +1172,7 @@ export const PlaceholderAuth: abi.PermissionLevel = {
                         // TODO serialize identity-request-type?
                         data = SerializationHelper.ByteArrayToHexString(new byte[] { });
 
-                        authorization = ((Identity) req.Item2).permission;
+                        authorization = ((IdentityV2) req.Value).permission;
                     }
 
                     return new[]
@@ -1059,12 +1181,12 @@ export const PlaceholderAuth: abi.PermissionLevel = {
                         {
                             account = "",
                             name = "identity",
-                            authorization = new List<EosSharp.Core.Api.v1.PermissionLevel>(){authorization},
+                            authorization = new List<EosSharp.Core.Api.v1.PermissionLevel>(){ authorization },
                             hex_data = data // TODO data or hex_data?
                         },
                     };
                 case "transaction":
-                    return ((EosSharp.Core.Api.v1.Transaction)req.Item2).actions.ToArray();
+                    return ((EosSharp.Core.Api.v1.Transaction)req.Value).actions.ToArray();
                 default:
                     throw new Exception("Invalid signing request data");
             }
@@ -1073,10 +1195,10 @@ export const PlaceholderAuth: abi.PermissionLevel = {
         /** Unresolved transaction. */
         public EosSharp.Core.Api.v1.Transaction getRawTransaction() {
             var req  = data.req;
-            switch (req.Item1)
+            switch (req.Key)
             {
                 case "transaction":
-                    return (EosSharp.Core.Api.v1.Transaction)req.Item2;
+                    return (EosSharp.Core.Api.v1.Transaction)req.Value;
                 case "action":
                 case "action[]":
                 case "identity":
@@ -1100,7 +1222,7 @@ export const PlaceholderAuth: abi.PermissionLevel = {
         /** Whether the request is an identity request. */
         public bool isIdentity()
         {
-            return data.req.Item1 == "identity";
+            return data.req.Key == "identity";
         }
 
         /** Whether the request should be broadcast by signer. */
@@ -1119,9 +1241,9 @@ export const PlaceholderAuth: abi.PermissionLevel = {
          *       use `isIdentity` to check id requests.
          */
         public string getIdentity() {
-            if (data.req.Item1 == "identity" && ((Identity)data.req.Item2).permission != null)
+            if (data.req.Key == "identity" && ((IdentityV2)data.req.Value).permission != null)
             {
-                string actor = ((Identity)data.req.Item2).permission.actor;
+                string actor = ((IdentityV2)data.req.Value).permission.actor;
                 return actor == Constants.PlaceholderName ? null : actor;
             }
             return null;
@@ -1133,9 +1255,9 @@ export const PlaceholderAuth: abi.PermissionLevel = {
      *       use `isIdentity` to check id requests.
      */
         public string getIdentityPermission() {
-            if (data.req.Item1 == "identity" && ((Identity)data.req.Item2).permission != null)
+            if (data.req.Key == "identity" && ((IdentityV2)data.req.Value).permission != null)
             {
-                string permission = ((Identity)data.req.Item2).permission.permission;
+                string permission = ((IdentityV2)data.req.Value).permission.permission;
                 return permission == Constants.PlaceholderName ? null : permission;
             }
             return null;
@@ -1147,7 +1269,7 @@ export const PlaceholderAuth: abi.PermissionLevel = {
 //            let rv: {[key: string]: Uint8Array } = { }
             var rv = new Dictionary<string, byte[]>();
 
-            foreach (var infoPair in data.info)
+            foreach (var infoPair in data.info.Cast<InfoPair>().ToList())
             {
                 rv.Add(infoPair.key, infoPair.value is string ? SerializationHelper.HexStringToByteArray((string)infoPair.value) : (byte[])infoPair.value);   // TODO 
             }
@@ -1172,7 +1294,7 @@ export const PlaceholderAuth: abi.PermissionLevel = {
         public void setInfoKey(string key, object value /* string | boolean*/)
         {
 
-            var pair = data.info.SingleOrDefault(i => i.key == key); 
+            var pair = data.info.Cast<InfoPair>().ToList().SingleOrDefault(i => i.key == key); 
             
             byte[] encodedValue;
             switch (value) {
@@ -1202,27 +1324,32 @@ export const PlaceholderAuth: abi.PermissionLevel = {
         }
 
         /** Return a deep copy of this request. */
-        public SigningRequest clone() {
-            RequestSignature signature = null;
-            if (this.signature != null)
-            {
-                signature = JsonConvert.DeserializeObject<RequestSignature>(
-                    JsonConvert.SerializeObject(this.signature));
-            }
-
-            SigningRequestData data = null;
-            if (this.data != null)
-            {
-                data = JsonConvert.DeserializeObject<SigningRequestData>(
-                    JsonConvert.SerializeObject(this.data));
-            }
+        public SigningRequest clone()
+        {
+            SigningRequestData clonedData = null;
+            if(data != null)
+                clonedData = new SigningRequestData()
+                {
+                    req = data.req,
+                    callback = data.callback,
+                    info = data.info,
+                    chain_id = data.chain_id,
+                    flags = data.flags
+                };
+            RequestSignature clonedRequestSignature = null;
+            if (signature != null)
+                clonedRequestSignature = new RequestSignature()
+                {
+                    signature = signature.signature,
+                    signer = signature.signer
+                };
 
             return new SigningRequest(
                 version,
-                data,
+                clonedData,
                 zlib,
                 abiProvider,
-                signature
+                clonedRequestSignature
             );
         }
 
@@ -1237,7 +1364,21 @@ export const PlaceholderAuth: abi.PermissionLevel = {
         {
             return this.encode();
         }*/
-    }
+        /**
+         * Present if the request is an identity request and requests a specific permission.
+         * @note This returns `nil` unless a specific permission has been requested,
+         *       use `isIdentity` to check id requests.
+         */
+        public string getIdentityScope() {
+            if (!this.isIdentity() || this.version <= 2)
+            {
+                return null;
+            }
+
+            var id = this.data.req.Value as IdentityV3;
+            return id.scope;
+        }
+}
 
     public class ResolvedSigningRequest
     {
@@ -1314,8 +1455,15 @@ export const PlaceholderAuth: abi.PermissionLevel = {
                 payload.bn = blockNum.ToString();
             }
 
-            Regex regex = new Regex(@"({{([a-z0-9]+)}})");
-            string url = regex.Replace(callback, "");
+            string url = callback
+                .Replace("{{sig}}", payload.sig)
+                .Replace("{{tx}}", payload.tx)
+                .Replace("{{rbn}}", payload.rbn)
+                .Replace("{{rid}}", payload.rid)
+                .Replace("{{ex}}", payload.ex)
+                .Replace("{{req}}", payload.req)
+                .Replace("{{sa}}", payload.sa)
+                .Replace("{{sp}}", payload.sp);
 
             return new ResolvedCallback()
             {

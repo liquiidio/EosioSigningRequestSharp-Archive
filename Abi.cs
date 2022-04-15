@@ -2,13 +2,21 @@
 
 using System;
 using System.Collections.Generic;
+using EosSharp.Core.DataAttributes;
 using AccountName = System.String; /*name*/
-using VariantId = System.Tuple<string, object>;
-using VariantReq = System.Tuple<string, object>;
-using RequestFlags = System.Int32;  //number;  // TODO
+using VariantId = System.Collections.Generic.KeyValuePair<string, object>;
+using VariantReq = System.Collections.Generic.KeyValuePair<string, object>;
+using RequestFlags = System.Byte;  //number;  // TODO
 
 namespace EosioSigningRequest
 {
+    //public struct VariantId
+    //{
+    //    public string Key;
+
+    //    public object Value;
+    //}
+
     public static class AbiConstants
     {
         public static byte RequestFlagsNone = 0;
@@ -32,7 +40,7 @@ namespace EosioSigningRequest
         public VariantReq req;
         public RequestFlags flags;
         public string callback;
-        public List<InfoPair> info;
+        public List<object> info;
     }
 
     public class InfoPair
@@ -41,9 +49,14 @@ namespace EosioSigningRequest
         public object value; //: Uint8Array | string /*bytes*/ // TODO// byte[] or string
     }
 
-    public class Identity
+    public class IdentityV2
     {
         public EosSharp.Core.Api.v1.PermissionLevel permission; // TODO | undefined | null
+    }
+
+    public class IdentityV3 : IdentityV2
+    {
+        public string scope;
     }
 
     public class RequestSignature
