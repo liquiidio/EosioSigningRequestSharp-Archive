@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="Abi.cs" />
+    <None Include="SigningRequest.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\eossharp\EosSharp\EosSharp.Core\EosSharp.Core.csproj" />
+    <ProjectReference Include="..\eossharp\EosSharp\EosSharp\EosSharp.csproj" />
+  </ItemGroup>
+
+</Project>

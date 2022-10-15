@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using EosSharp.Core.Api.v1;
 
-namespace EosioSigningRequest
+namespace EosioSigningRequestSharp
 {
     public static class SigningRequestAbi
     {

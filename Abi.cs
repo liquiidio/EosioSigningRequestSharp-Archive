@@ -2,13 +2,11 @@
 
 using System;
 using System.Collections.Generic;
-using EosSharp.Core.DataAttributes;
-using AccountName = System.String; /*name*/
 using VariantId = System.Collections.Generic.KeyValuePair<string, object>;
 using VariantReq = System.Collections.Generic.KeyValuePair<string, object>;
 using RequestFlags = System.Byte;  //number;  // TODO
 
-namespace EosioSigningRequest
+namespace EosioSigningRequestSharp
 {
     //public struct VariantId
     //{
@@ -61,7 +59,7 @@ namespace EosioSigningRequest
 
     public class RequestSignature
     {
-        public AccountName signer;
+        public string signer;
         public string signature;
     }
 

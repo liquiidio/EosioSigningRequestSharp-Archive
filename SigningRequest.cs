@@ -6,6 +6,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -26,7 +27,7 @@ using VariantId = System.Collections.Generic.KeyValuePair<string, object>;
 using Newtonsoft.Json;
 using Action = EosSharp.Core.Api.v1.Action;
 
-namespace EosioSigningRequest
+namespace EosioSigningRequestSharp
 {
     public static class Constants
     {
@@ -122,6 +123,29 @@ namespace EosioSigningRequest
 
         /** Inflate data w/o requiring zlib header. */
         byte[] inflateRaw(byte[] data);
+    }
+
+    public class NetZlibProvider : IZlibProvider
+    {
+        public byte[] deflateRaw(byte[] data)
+        {
+            using var outStream = new MemoryStream();
+            using (var deflateStream = new DeflateStream(new MemoryStream(data), CompressionMode.Decompress))
+            {
+                deflateStream.CopyTo(outStream);
+            }
+            return outStream.ToArray();
+        }
+
+        public byte[] inflateRaw(byte[] data)
+        {
+            using var outStream = new MemoryStream();
+            using (var deflateStream = new DeflateStream(new MemoryStream(data), CompressionMode.Compress))
+            {
+                deflateStream.CopyTo(outStream);
+            }
+            return outStream.ToArray();
+        }
     }
 
     /** Interface that should be implemented by signature providers. */
